@@ -22,12 +22,12 @@ const unsigned long SEND_INTERVAL = 3000; // Envia a cada 3 segundos
 // ========================================================
 // Pinos: RX (D1 = GPIO 5), TX (D2 = GPIO 4)
 // Conexão física:
-// NEO-7M TX  -> NodeMCU D1 (GPIO 5)
-// NEO-7M RX  -> NodeMCU D2 (GPIO 4)
+// NEO-7M TX  -> NodeMCU D1 (GPIO 1)
+// NEO-7M RX  -> NodeMCU D2 (GPIO 2)
 // NEO-7M VCC -> NodeMCU 3V3 (ou 5V se o módulo tiver regulador)
 // NEO-7M GND -> NodeMCU GND
-static const int RXPin = 5;
-static const int TXPin = 4;
+static const int RXPin = 1;
+static const int TXPin = 2;
 static const uint32_t GPSBaud = 9600;
 
 TinyGPSPlus gps;

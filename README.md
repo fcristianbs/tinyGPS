@@ -71,3 +71,4 @@ tinyGPS/
 
 > ⚠️ **Nota sobre Vercel e Serverless:**  
 > Como a Vercel utiliza funções Serverless sem estado em memória persistente, para armazenar o histórico de coordenadas em longo prazo na nuvem recomenda-se conectar um banco de dados leve ou Redis (ex: Upstash Redis ou Supabase). Para testes contínuos sem banco de dados, plataformas com instâncias persistentes como [Render.com](https://render.com) ou servidores VPS também são excelentes opções.
+
