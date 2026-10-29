@@ -1,18 +1,18 @@
 #include <ESP8266WiFi.h>
 #include <ESP8266HTTPClient.h>
+#include <WiFiClientSecure.h>
 #include <WiFiClient.h>
 #include <SoftwareSerial.h>
 #include <TinyGPSPlus.h>
 
 // ========================================================
-// CONFIGURAÇÃO DO WI-FI E SERVIDOR FLASK
+// CONFIGURAÇÃO DO WI-FI E SERVIDOR (VERCEL)
 // ========================================================
 const char* WIFI_SSID     = "SEU_WIFI_NOME";        // <--- Digite o nome da sua rede Wi-Fi
 const char* WIFI_PASSWORD = "SUA_SENHA_WIFI";       // <--- Digite a senha do seu Wi-Fi
 
-// Endereço IP do seu computador na rede local (exibido no terminal ao iniciar o app.py)
-// Exemplo: "http://192.168.1.100:5000/api/gps"
-const char* SERVER_URL    = "http://SEU_IP_DO_PC:5000/api/gps";
+// Rota da API na Vercel (com HTTPS)
+const char* SERVER_URL    = "https://tiny-gps.vercel.app/api/gps";
 
 // Intervalo de envio das coordenadas via HTTP (em milissegundos)
 const unsigned long SEND_INTERVAL = 3000; // Envia a cada 3 segundos
@@ -22,12 +22,12 @@ const unsigned long SEND_INTERVAL = 3000; // Envia a cada 3 segundos
 // ========================================================
 // Pinos: RX (D1 = GPIO 5), TX (D2 = GPIO 4)
 // Conexão física:
-// NEO-7M TX  -> NodeMCU D1 (GPIO 1)
-// NEO-7M RX  -> NodeMCU D2 (GPIO 2)
+// NEO-7M TX  -> NodeMCU D1 (GPIO 5)
+// NEO-7M RX  -> NodeMCU D2 (GPIO 4)
 // NEO-7M VCC -> NodeMCU 3V3 (ou 5V se o módulo tiver regulador)
 // NEO-7M GND -> NodeMCU GND
-static const int RXPin = 1;
-static const int TXPin = 2;
+static const int RXPin = 5;
+static const int TXPin = 4;
 static const uint32_t GPSBaud = 9600;
 
 TinyGPSPlus gps;
@@ -68,8 +68,12 @@ void sendGpsData() {
     return;
   }
 
-  WiFiClient client;
+  // Suporte a HTTPS para a Vercel
+  WiFiClientSecure client;
+  client.setInsecure(); // Desativa checagem estrita de certificados SSL para otimizar RAM do ESP8266
+
   HTTPClient http;
+  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
 
   if (http.begin(client, SERVER_URL)) {
     http.addHeader("Content-Type", "application/json");
