@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Rastreador GPS NEO-7M | ESP8266</title>
+  
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  
+  <!-- Google Fonts & FontAwesome -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
+
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+
+    body, html {
+      height: 100%;
+      width: 100%;
+      overflow: hidden;
+      background-color: #0f172a;
+      color: #f8fafc;
+    }
+
+    #map {
+      height: 100vh;
+      width: 100vw;
+      z-index: 1;
+    }
+
+    /* Floating Panel */
+    .dashboard-panel {
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      z-index: 1000;
+      background: rgba(15, 23, 42, 0.88);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 16px;
+      padding: 20px;
+      width: 360px;
+      max-width: calc(100vw - 40px);
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.45);
+      transition: all 0.3s ease;
+    }
+
+    .panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 16px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    .title-area h1 {
+      font-size: 1.15rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: #38bdf8;
+    }
+
+    .status-badge {
+      font-size: 0.75rem;
+      font-weight: 600;
+      padding: 4px 10px;
+      border-radius: 20px;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .status-badge.online {
+      background: rgba(34, 197, 94, 0.2);
+      color: #4ade80;
+      border: 1px solid rgba(34, 197, 94, 0.4);
+    }
+
+    .status-badge.waiting {
+      background: rgba(245, 158, 11, 0.2);
+      color: #fbbf24;
+      border: 1px solid rgba(245, 158, 11, 0.4);
+    }
+
+    .status-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background-color: currentColor;
+    }
+
+    .online .status-dot {
+      box-shadow: 0 0 8px #4ade80;
+      animation: pulse 1.8s infinite;
+    }
+
+    @keyframes pulse {
+      0% { transform: scale(0.95); opacity: 0.7; }
+      50% { transform: scale(1.3); opacity: 1; }
+      100% { transform: scale(0.95); opacity: 0.7; }
+    }
+
+    /* Grid of Metrics */
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .metric-card {
+      background: rgba(30, 41, 59, 0.7);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      border-radius: 12px;
+      padding: 12px;
+    }
+
+    .metric-card.full-width {
+      grid-column: span 2;
+    }
+
+    .metric-label {
+      font-size: 0.75rem;
+      color: #94a3b8;
+      margin-bottom: 4px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .metric-value {
+      font-size: 1.15rem;
+      font-weight: 700;
+      color: #f1f5f9;
+      word-break: break-all;
+    }
+
+    .metric-unit {
+      font-size: 0.8rem;
+      font-weight: 500;
+      color: #64748b;
+      margin-left: 2px;
+    }
+
+    /* Controls & Actions */
+    .actions-row {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      margin-top: 14px;
+    }
+
+    .btn {
+      flex: 1;
+      padding: 9px 12px;
+      border-radius: 8px;
+      font-size: 0.82rem;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      border: none;
+      transition: all 0.2s ease;
+    }
+
+    .btn-secondary {
+      background: rgba(51, 65, 85, 0.8);
+      color: #e2e8f0;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+    .btn-secondary:hover {
+      background: rgba(71, 85, 105, 1);
+    }
+
+    .toggle-wrap {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.78rem;
+      color: #cbd5e1;
+      cursor: pointer;
+      user-select: none;
+      margin-top: 8px;
+    }
+
+    .toggle-wrap input {
+      accent-color: #38bdf8;
+      cursor: pointer;
+    }
+
+    /* Custom Leaflet Marker */
+    .custom-gps-marker {
+      background: #0284c7;
+      border: 3px solid #ffffff;
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      box-shadow: 0 0 15px rgba(2, 132, 199, 0.8), 0 0 30px rgba(56, 189, 248, 0.5);
+      animation: ripple 2s infinite ease-out;
+    }
+
+    @keyframes ripple {
+      0% { box-shadow: 0 0 0 0 rgba(56, 189, 248, 0.7); }
+      70% { box-shadow: 0 0 0 16px rgba(56, 189, 248, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(56, 189, 248, 0); }
+    }
+  </style>
+</head>
+<body>
+
+  <div id="map"></div>
+
+  <div class="dashboard-panel">
+    <div class="panel-header">
+      <div class="title-area">
+        <h1><i class="fa-solid fa-satellite-dish"></i> GPS Tracker</h1>
+      </div>
+      <div id="statusBadge" class="status-badge waiting">
+        <span class="status-dot"></span>
+        <span id="statusText">Aguardando dados...</span>
+      </div>
+    </div>
+
+    <div class="metrics-grid">
+      <div class="metric-card full-width">
+        <div class="metric-label"><i class="fa-solid fa-location-dot"></i> Coordenadas</div>
+        <div class="metric-value" id="coordsValue">-- , --</div>
+      </div>
+
+      <div class="metric-card">
+        <div class="metric-label"><i class="fa-solid fa-gauge-high"></i> Velocidade</div>
+        <div class="metric-value"><span id="speedValue">--</span><span class="metric-unit">km/h</span></div>
+      </div>
+
+      <div class="metric-card">
+        <div class="metric-label"><i class="fa-solid fa-mountain"></i> Altitude</div>
+        <div class="metric-value"><span id="altitudeValue">--</span><span class="metric-unit">m</span></div>
+      </div>
+
+      <div class="metric-card">
+        <div class="metric-label"><i class="fa-solid fa-satellite"></i> Satélites</div>
+        <div class="metric-value" id="satellitesValue">--</div>
+      </div>
+
+      <div class="metric-card">
+        <div class="metric-label"><i class="fa-solid fa-clock"></i> Último Envio</div>
+        <div class="metric-value" style="font-size: 0.88rem; font-weight: 600;" id="timestampValue">--</div>
+      </div>
+    </div>
+
+    <label class="toggle-wrap">
+      <input type="checkbox" id="autoCenterToggle" checked>
+      Centralizar automaticamente no mapa
+    </label>
+
+    <div class="actions-row">
+      <button class="btn btn-secondary" onclick="centerOnLatest()"><i class="fa-solid fa-crosshairs"></i> Focar GPS</button>
+      <button class="btn btn-secondary" onclick="clearTrail()"><i class="fa-solid fa-trash-can"></i> Limpar Rota</button>
+    </div>
+  </div>
+
+  <!-- Leaflet JS -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <script>
+    // Inicialização do Mapa Leaflet
+    const defaultCoords = [-23.55052, -46.633308]; // Padrão: São Paulo
+    const map = leafletMap = L.map('map', {
+      zoomControl: false
+    }).setView(defaultCoords, 13);
+
+    // Reposiciona o controle de zoom para o canto inferior direito
+    L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+    // Camada de Mapa OpenStreetMap (Dark tiles com CARTO ou Padrão OSM)
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+      subdomains: 'abcd',
+      maxZoom: 20
+    }).addTo(map);
+
+    // Marcador com ícone estilizado
+    const markerIcon = L.divIcon({
+      className: 'custom-gps-marker',
+      iconSize: [20, 20],
+      iconAnchor: [10, 10]
+    });
+
+    let gpsMarker = null;
+    let pathPolyline = L.polyline([], {
+      color: '#0284c7',
+      weight: 4,
+      opacity: 0.85,
+      smoothFactor: 1
+    }).addTo(map);
+
+    let latestLocation = null;
+    let initialZoomDone = false;
+
+    // Atualização dos elementos da tela
+    function updateUI(entry) {
+      if (!entry) return;
+
+      document.getElementById('statusBadge').className = 'status-badge online';
+      document.getElementById('statusText').innerText = 'Online';
+
+      document.getElementById('coordsValue').innerText = `${entry.lat.toFixed(6)}, ${entry.lng.toFixed(6)}`;
+      document.getElementById('speedValue').innerText = entry.speed.toFixed(1);
+      document.getElementById('altitudeValue').innerText = entry.altitude.toFixed(1);
+      document.getElementById('satellitesValue').innerText = entry.satellites;
+      document.getElementById('timestampValue').innerText = entry.timestamp || '--';
+
+      const latLng = [entry.lat, entry.lng];
+      latestLocation = latLng;
+
+      // Atualiza marcador
+      if (!gpsMarker) {
+        gpsMarker = L.marker(latLng, { icon: markerIcon }).addTo(map);
+        gpsMarker.bindPopup(`<b>NEO-7M GPS</b><br>Lat: ${entry.lat.toFixed(6)}<br>Lng: ${entry.lng.toFixed(6)}`);
+      } else {
+        gpsMarker.setLatLng(latLng);
+        gpsMarker.setPopupContent(`<b>NEO-7M GPS</b><br>Lat: ${entry.lat.toFixed(6)}<br>Lng: ${entry.lng.toFixed(6)}<br>Velocidade: ${entry.speed.toFixed(1)} km/h`);
+      }
+
+      // Se for a primeira coordenada recebida ou autoCenter estiver ativo
+      const autoCenter = document.getElementById('autoCenterToggle').checked;
+      if (!initialZoomDone) {
+        map.setView(latLng, 16);
+        initialZoomDone = true;
+      } else if (autoCenter) {
+        map.panTo(latLng);
+      }
+    }
+
+    // Consulta periódica à API Flask
+    async function fetchGpsData() {
+      try {
+        const response = await fetch('/api/gps');
+        if (!response.ok) return;
+
+        const data = await response.json();
+
+        // Atualiza polilinha do percurso
+        if (data.history && data.history.length > 0) {
+          const points = data.history.map(pt => [pt.lat, pt.lng]);
+          pathPolyline.setLatLngs(points);
+        } else {
+          pathPolyline.setLatLngs([]);
+        }
+
+        if (data.latest) {
+          updateUI(data.latest);
+        }
+      } catch (err) {
+        console.warn('Erro ao buscar dados do GPS:', err);
+      }
+    }
+
+    function centerOnLatest() {
+      if (latestLocation) {
+        map.setView(latestLocation, 17, { animate: true });
+      }
+    }
+
+    async function clearTrail() {
+      try {
+        await fetch('/api/gps/clear', { method: 'POST' });
+        pathPolyline.setLatLngs([]);
+      } catch (err) {
+        console.error('Erro ao limpar rota:', err);
+      }
+    }
+
+    // Polling a cada 2 segundos
+    setInterval(fetchGpsData, 2000);
+    fetchGpsData();
+  </script>
+</body>
+</html>
+
