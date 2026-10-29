@@ -2,6 +2,7 @@ from datetime import datetime
 import os
 import socket
 import time
+from urllib.parse import parse_qs
 from flask import Flask, jsonify, render_template, request
 
 # Configuração robusta do diretório de templates (funciona local e na Vercel)
@@ -22,15 +23,25 @@ for tdir in template_dirs:
 
 app = Flask(__name__, template_folder=template_folder)
 
-# Middleware para a Vercel: restaura a rota original a partir do header x-matched-path
+# Middleware para a Vercel: restaura o caminho real a partir do parâmetro path da reescrita
 class VercelPathMiddleware:
     def __init__(self, wsgi_app):
         self.wsgi_app = wsgi_app
 
     def __call__(self, environ, start_response):
-        matched_path = environ.get('HTTP_X_MATCHED_PATH')
-        if matched_path:
-            environ['PATH_INFO'] = matched_path
+        query_string = environ.get('QUERY_STRING', '')
+        if query_string:
+            qs = parse_qs(query_string)
+            if 'path' in qs and qs['path']:
+                real_path = qs['path'][0]
+                if not real_path.startswith('/'):
+                    real_path = '/' + real_path
+                environ['PATH_INFO'] = real_path
+
+        # Caso a Vercel chame /api/index diretamente sem query string, cai na home
+        if environ.get('PATH_INFO') == '/api/index':
+            environ['PATH_INFO'] = '/'
+
         return self.wsgi_app(environ, start_response)
 
 app.wsgi_app = VercelPathMiddleware(app.wsgi_app)
@@ -61,16 +72,6 @@ def get_local_ip():
     finally:
         s.close()
     return ip
-
-@app.errorhandler(404)
-def not_found(e):
-    return jsonify({
-        "error": "404",
-        "path": request.path,
-        "environ_path_info": request.environ.get('PATH_INFO'),
-        "x_matched_path": request.headers.get('x-matched-path'),
-        "all_headers": dict(request.headers)
-    }), 404
 
 @app.route('/')
 def index():
