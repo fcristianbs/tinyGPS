@@ -62,6 +62,16 @@ def get_local_ip():
         s.close()
     return ip
 
+@app.errorhandler(404)
+def not_found(e):
+    return jsonify({
+        "error": "404",
+        "path": request.path,
+        "environ_path_info": request.environ.get('PATH_INFO'),
+        "x_matched_path": request.headers.get('x-matched-path'),
+        "all_headers": dict(request.headers)
+    }), 404
+
 @app.route('/')
 def index():
     return render_template('index.html')
