@@ -22,6 +22,19 @@ for tdir in template_dirs:
 
 app = Flask(__name__, template_folder=template_folder)
 
+# Middleware para a Vercel: restaura a rota original a partir do header x-matched-path
+class VercelPathMiddleware:
+    def __init__(self, wsgi_app):
+        self.wsgi_app = wsgi_app
+
+    def __call__(self, environ, start_response):
+        matched_path = environ.get('HTTP_X_MATCHED_PATH')
+        if matched_path:
+            environ['PATH_INFO'] = matched_path
+        return self.wsgi_app(environ, start_response)
+
+app.wsgi_app = VercelPathMiddleware(app.wsgi_app)
+
 # Armazenamento em memória dos dados do GPS e status do ESP8266
 gps_data = {
     "latest": None,
@@ -50,7 +63,6 @@ def get_local_ip():
     return ip
 
 @app.route('/')
-@app.route('/api/index')
 def index():
     return render_template('index.html')
 
