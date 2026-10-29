@@ -14,7 +14,7 @@ const char* WIFI_PASSWORD = "SUA_SENHA_WIFI";       // <--- Digite a senha do se
 // Rota da API na Vercel (com HTTPS)
 const char* SERVER_URL    = "https://tiny-gps.vercel.app/api/gps";
 
-// Intervalo de envio das coordenadas via HTTP (em milissegundos)
+// Intervalo de envio das coordenadas/status via HTTP (em milissegundos)
 const unsigned long SEND_INTERVAL = 3000; // Envia a cada 3 segundos
 
 // ========================================================
@@ -34,6 +34,66 @@ TinyGPSPlus gps;
 SoftwareSerial ss(RXPin, TXPin);
 
 unsigned long lastSendTime = 0;
+
+void sendStatusUpdate(bool hasFix) {
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println(F("[WIFI] Desconectado. Tentando reconectar..."));
+    WiFi.reconnect();
+    return;
+  }
+
+  // Suporte a HTTPS para a Vercel
+  WiFiClientSecure client;
+  client.setInsecure(); // Desativa validação de certificado para economizar RAM
+
+  HTTPClient http;
+  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+
+  if (http.begin(client, SERVER_URL)) {
+    http.addHeader("Content-Type", "application/json");
+
+    // Monta o JSON com os dados de status e GPS
+    String payload = "{";
+    payload += "\"ip\":\"" + WiFi.localIP().toString() + "\",";
+    payload += "\"rssi\":" + String(WiFi.RSSI()) + ",";
+    payload += "\"satellites\":" + String(gps.satellites.isValid() ? gps.satellites.value() : 0);
+
+    if (hasFix && gps.location.isValid()) {
+      payload += ",\"lat\":" + String(gps.location.lat(), 6);
+      payload += ",\"lng\":" + String(gps.location.lng(), 6);
+      payload += ",\"speed\":" + String(gps.speed.isValid() ? gps.speed.kmph() : 0.0, 1);
+      payload += ",\"altitude\":" + String(gps.altitude.isValid() ? gps.altitude.meters() : 0.0, 1);
+
+      if (gps.date.isValid() && gps.time.isValid()) {
+        char dataHora[32];
+        sprintf(dataHora, "%02d/%02d/%04d %02d:%02d:%02d",
+                gps.date.day(), gps.date.month(), gps.date.year(),
+                gps.time.hour(), gps.time.minute(), gps.time.second());
+        payload += ",\"timestamp\":\"" + String(dataHora) + "\"";
+      }
+    } else {
+      payload += ",\"gps_fix\":false";
+    }
+    payload += "}";
+
+    if (hasFix) {
+      Serial.print(F("[HTTP] Enviando coordenadas GPS -> "));
+    } else {
+      Serial.print(F("[HTTP] Enviando status Wi-Fi (sem fix GPS ainda) -> "));
+    }
+    Serial.println(payload);
+
+    int httpCode = http.POST(payload);
+    if (httpCode > 0) {
+      Serial.printf("[HTTP] Codigo de resposta: %d\n", httpCode);
+    } else {
+      Serial.printf("[HTTP] Falha no POST: %s\n", http.errorToString(httpCode).c_str());
+    }
+    http.end();
+  } else {
+    Serial.println(F("[HTTP] Erro ao iniciar conexao HTTP."));
+  }
+}
 
 void connectWiFi() {
   Serial.println();
@@ -55,60 +115,13 @@ void connectWiFi() {
     Serial.println(F("[WIFI] Conectado com sucesso!"));
     Serial.print(F("[WIFI] Endereco IP do ESP8266: "));
     Serial.println(WiFi.localIP());
+
+    // Notifica imediatamente o servidor que a placa está online no Wi-Fi
+    Serial.println(F("[WIFI] Notificando servidor sobre conexao bem-sucedida..."));
+    sendStatusUpdate(false);
   } else {
     Serial.println();
     Serial.println(F("[WIFI] Falha ao conectar. Tentara reconectar no loop."));
-  }
-}
-
-void sendGpsData() {
-  if (WiFi.status() != WL_CONNECTED) {
-    Serial.println(F("[WIFI] Desconectado. Tentando reconectar..."));
-    WiFi.reconnect();
-    return;
-  }
-
-  // Suporte a HTTPS para a Vercel
-  WiFiClientSecure client;
-  client.setInsecure(); // Desativa checagem estrita de certificados SSL para otimizar RAM do ESP8266
-
-  HTTPClient http;
-  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
-
-  if (http.begin(client, SERVER_URL)) {
-    http.addHeader("Content-Type", "application/json");
-
-    // Monta o JSON com os dados do GPS
-    String payload = "{";
-    payload += "\"lat\":" + String(gps.location.lat(), 6) + ",";
-    payload += "\"lng\":" + String(gps.location.lng(), 6) + ",";
-    payload += "\"speed\":" + String(gps.speed.isValid() ? gps.speed.kmph() : 0.0, 1) + ",";
-    payload += "\"altitude\":" + String(gps.altitude.isValid() ? gps.altitude.meters() : 0.0, 1) + ",";
-    payload += "\"satellites\":" + String(gps.satellites.isValid() ? gps.satellites.value() : 0) + ",";
-
-    if (gps.date.isValid() && gps.time.isValid()) {
-      char dataHora[32];
-      sprintf(dataHora, "%02d/%02d/%04d %02d:%02d:%02d",
-              gps.date.day(), gps.date.month(), gps.date.year(),
-              gps.time.hour(), gps.time.minute(), gps.time.second());
-      payload += "\"timestamp\":\"" + String(dataHora) + "\"";
-    } else {
-      payload += "\"timestamp\":\"\"";
-    }
-    payload += "}";
-
-    Serial.print(F("[HTTP] Enviando coordenadas -> "));
-    Serial.println(payload);
-
-    int httpCode = http.POST(payload);
-    if (httpCode > 0) {
-      Serial.printf("[HTTP] Codigo de resposta: %d\n", httpCode);
-    } else {
-      Serial.printf("[HTTP] Falha no POST: %s\n", http.errorToString(httpCode).c_str());
-    }
-    http.end();
-  } else {
-    Serial.println(F("[HTTP] Erro ao iniciar conexao HTTP."));
   }
 }
 
@@ -150,10 +163,10 @@ void loop() {
       Serial.print(F(", Lng="));
       Serial.println(gps.location.lng(), 6);
 
-      // Envia os dados para a API Flask
-      sendGpsData();
+      sendStatusUpdate(true);
     } else {
-      Serial.println(F("[GPS] Aguardando fix de localizacao dos satelites (leve o modulo para perto da janela/ar livre)..."));
+      Serial.println(F("[GPS] Aguardando fix dos satelites (enviando sinal de Wi-Fi ativo para o servidor)..."));
+      sendStatusUpdate(false);
     }
   }
 

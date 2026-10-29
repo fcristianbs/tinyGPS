@@ -1,6 +1,7 @@
 from datetime import datetime
 import os
 import socket
+import time
 from flask import Flask, jsonify, render_template, request
 
 # Configuração robusta do diretório de templates (funciona local e na Vercel)
@@ -21,10 +22,19 @@ for tdir in template_dirs:
 
 app = Flask(__name__, template_folder=template_folder)
 
-# Armazenamento em memória dos dados do GPS
+# Armazenamento em memória dos dados do GPS e status do ESP8266
 gps_data = {
     "latest": None,
-    "history": []
+    "history": [],
+    "device": {
+        "online": False,
+        "last_seen": None,
+        "last_seen_epoch": 0,
+        "ip": None,
+        "rssi": None,
+        "gps_fix": False,
+        "satellites": 0
+    }
 }
 
 def get_local_ip():
@@ -50,34 +60,58 @@ def receive_gps():
     if not data:
         return jsonify({"error": "Formato JSON inválido"}), 400
 
+    now_epoch = time.time()
+    now_str = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+
+    # Atualiza o status de conexão da placa ESP8266
+    gps_data["device"]["online"] = True
+    gps_data["device"]["last_seen"] = now_str
+    gps_data["device"]["last_seen_epoch"] = now_epoch
+    gps_data["device"]["ip"] = data.get("ip")
+    gps_data["device"]["rssi"] = data.get("rssi")
+    gps_data["device"]["satellites"] = int(data.get("satellites", 0))
+
     lat = data.get('lat')
     lng = data.get('lng')
 
+    # Se a placa enviou dados mas ainda está sem sinal de GPS (apenas Wi-Fi conectado)
     if lat is None or lng is None:
-        return jsonify({"error": "Latitude e Longitude são obrigatórias"}), 400
+        gps_data["device"]["gps_fix"] = False
+        print(f"[{now_str}] Placa conectada ao Wi-Fi! IP: {data.get('ip')} | Satélites: {gps_data['device']['satellites']} (Aguardando fix do GPS)")
+        return jsonify({
+            "status": "ok",
+            "message": "Placa online via Wi-Fi. Aguardando satélites...",
+            "device": gps_data["device"]
+        }), 200
 
+    # Quando as coordenadas forem válidas
+    gps_data["device"]["gps_fix"] = True
     entry = {
         "lat": float(lat),
         "lng": float(lng),
         "speed": float(data.get('speed', 0.0)),
         "altitude": float(data.get('altitude', 0.0)),
         "satellites": int(data.get('satellites', 0)),
-        "timestamp": data.get('timestamp') or datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+        "timestamp": data.get('timestamp') or now_str
     }
 
     gps_data["latest"] = entry
     gps_data["history"].append(entry)
 
-    # Limita o histórico aos últimos 1000 pontos para poupar memória
     if len(gps_data["history"]) > 1000:
         gps_data["history"].pop(0)
 
-    print(f"[{entry['timestamp']}] Coordenadas recebidas -> Lat: {entry['lat']:.6f}, Lng: {entry['lng']:.6f}")
+    print(f"[{entry['timestamp']}] Coordenadas recebidas -> Lat: {entry['lat']:.6f}, Lng: {entry['lng']:.6f}, Sat: {entry['satellites']}")
 
-    return jsonify({"status": "ok", "entry": entry}), 200
+    return jsonify({"status": "ok", "entry": entry, "device": gps_data["device"]}), 200
 
 @app.route('/api/gps', methods=['GET'])
 def get_gps():
+    # Se não houver envio da placa há mais de 15 segundos, marca como offline
+    if gps_data["device"]["last_seen_epoch"] > 0:
+        if time.time() - gps_data["device"]["last_seen_epoch"] > 15:
+            gps_data["device"]["online"] = False
+
     return jsonify(gps_data)
 
 @app.route('/api/gps/clear', methods=['POST'])
