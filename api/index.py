@@ -3,7 +3,12 @@ import os
 import socket
 import time
 from urllib.parse import parse_qs
+from dotenv import load_dotenv
 from flask import Flask, jsonify, render_template, request
+import pymysql
+
+# Carrega variáveis de ambiente do .env
+load_dotenv()
 
 # Configuração robusta do diretório de templates (funciona local e na Vercel)
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -45,6 +50,115 @@ class VercelPathMiddleware:
         return self.wsgi_app(environ, start_response)
 
 app.wsgi_app = VercelPathMiddleware(app.wsgi_app)
+
+# ========================================================
+# CONEXÃO COM O BANCO DE DADOS (TABELA DISCRETA: geo_telemetry_logs)
+# ========================================================
+def get_db_connection():
+    host = os.getenv('DB_HOST')
+    if not host:
+        return None
+    try:
+        return pymysql.connect(
+            host=host,
+            port=int(os.getenv('DB_PORT', 3306)),
+            user=os.getenv('DB_USER'),
+            password=os.getenv('DB_PASSWORD'),
+            database=os.getenv('DB_NAME'),
+            connect_timeout=4,
+            autocommit=True,
+            cursorclass=pymysql.cursors.DictCursor
+        )
+    except Exception as e:
+        print(f"[DB] Erro de conexao com banco MySQL: {e}")
+        return None
+
+def init_db():
+    conn = get_db_connection()
+    if not conn:
+        return
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+            CREATE TABLE IF NOT EXISTS geo_telemetry_logs (
+                id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                device_ip VARCHAR(45) NULL,
+                rssi INT NULL,
+                satellites INT DEFAULT 0,
+                latitude DECIMAL(10, 7) NOT NULL,
+                longitude DECIMAL(10, 7) NOT NULL,
+                altitude DECIMAL(8, 2) DEFAULT 0.00,
+                speed_kmph DECIMAL(6, 2) DEFAULT 0.00,
+                gps_time VARCHAR(30) NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                INDEX idx_created_at (created_at)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+            """)
+    except Exception as e:
+        print(f"[DB] Erro ao inicializar tabela: {e}")
+    finally:
+        conn.close()
+
+def save_point_to_db(entry, dev):
+    conn = get_db_connection()
+    if not conn:
+        return
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO geo_telemetry_logs 
+                (device_ip, rssi, satellites, latitude, longitude, altitude, speed_kmph, gps_time)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            """, (
+                dev.get('ip'),
+                dev.get('rssi'),
+                entry.get('satellites', 0),
+                entry['lat'],
+                entry['lng'],
+                entry.get('altitude', 0.0),
+                entry.get('speed', 0.0),
+                entry.get('timestamp')
+            ))
+    except Exception as e:
+        print(f"[DB] Erro ao salvar ponto no banco: {e}")
+    finally:
+        conn.close()
+
+def load_recent_points_from_db(limit=300):
+    conn = get_db_connection()
+    if not conn:
+        return []
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT latitude as lat, longitude as lng, speed_kmph as speed, 
+                       altitude, satellites, gps_time as timestamp, created_at
+                FROM geo_telemetry_logs
+                ORDER BY id DESC
+                LIMIT %s
+            """, (limit,))
+            rows = cur.fetchall()
+            rows.reverse()
+            for r in rows:
+                r['lat'] = float(r['lat'])
+                r['lng'] = float(r['lng'])
+                r['speed'] = float(r['speed'] or 0.0)
+                r['altitude'] = float(r['altitude'] or 0.0)
+                if not r['timestamp'] and r['created_at']:
+                    r['timestamp'] = r['created_at'].strftime("%d/%m/%Y %H:%M:%S")
+                r.pop('created_at', None)
+            return rows
+    except Exception as e:
+        print(f"[DB] Erro ao carregar historico do banco: {e}")
+        return []
+    finally:
+        conn.close()
+
+# Inicializa tabela se o banco estiver configurado
+try:
+    init_db()
+except Exception:
+    pass
 
 # Armazenamento em memória dos dados do GPS e status do ESP8266
 gps_data = {
@@ -124,15 +238,26 @@ def receive_gps():
     if len(gps_data["history"]) > 1000:
         gps_data["history"].pop(0)
 
-    print(f"[{entry['timestamp']}] Coordenadas recebidas -> Lat: {entry['lat']:.6f}, Lng: {entry['lng']:.6f}, Sat: {entry['satellites']}")
+    # Persiste na tabela discreta do banco MySQL
+    save_point_to_db(entry, gps_data["device"])
+
+    print(f"[{entry['timestamp']}] Coordenadas salvas no BD -> Lat: {entry['lat']:.6f}, Lng: {entry['lng']:.6f}, Sat: {entry['satellites']}")
 
     return jsonify({"status": "ok", "entry": entry, "device": gps_data["device"]}), 200
 
 @app.route('/api/gps', methods=['GET'])
 def get_gps():
-    # Se não houver envio da placa há mais de 15 segundos, marca como offline
+    # Se o histórico em memória estiver vazio (ex: inicialização ou reinício na Vercel), restaura do BD
+    if not gps_data["history"]:
+        db_points = load_recent_points_from_db(limit=300)
+        if db_points:
+            gps_data["history"] = db_points
+            if not gps_data["latest"]:
+                gps_data["latest"] = db_points[-1]
+
+    # Se não houver envio da placa há mais de 45 segundos, marca como offline
     if gps_data["device"]["last_seen_epoch"] > 0:
-        if time.time() - gps_data["device"]["last_seen_epoch"] > 15:
+        if time.time() - gps_data["device"]["last_seen_epoch"] > 45:
             gps_data["device"]["online"] = False
 
     return jsonify(gps_data)
@@ -142,7 +267,7 @@ def clear_history():
     gps_data["history"] = []
     if gps_data["latest"]:
         gps_data["history"].append(gps_data["latest"])
-    return jsonify({"status": "ok", "message": "Histórico limpo"})
+    return jsonify({"status": "ok", "message": "Histórico em tela limpo"})
 
 if __name__ == '__main__':
     local_ip = get_local_ip()

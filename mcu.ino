@@ -8,8 +8,8 @@
 // ========================================================
 // CONFIGURAÇÃO DO WI-FI E SERVIDOR (VERCEL)
 // ========================================================
-const char* WIFI_SSID     = "SEU_WIFI_NOME";        // <--- Digite o nome da sua rede Wi-Fi
-const char* WIFI_PASSWORD = "SUA_SENHA_WIFI";       // <--- Digite a senha do seu Wi-Fi
+const char* WIFI_SSID     = "CASA NOSSA";        // <--- Digite o nome da sua rede Wi-Fi
+const char* WIFI_PASSWORD = "99461001";       // <--- Digite a senha do seu Wi-Fi
 
 // Rota da API na Vercel (com HTTPS)
 const char* SERVER_URL    = "https://tiny-gps.vercel.app/api/gps";
