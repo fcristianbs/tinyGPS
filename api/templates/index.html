@@ -286,11 +286,10 @@
     // Reposiciona o controle de zoom para o canto inferior direito
     L.control.zoom({ position: 'bottomright' }).addTo(map);
 
-    // Camada de Mapa OpenStreetMap (Dark tiles com CARTO ou Padrão OSM)
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
-      subdomains: 'abcd',
-      maxZoom: 20
+    // Camada de Mapa oficial OpenStreetMap (100% gratuita, sem necessidade de API key)
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
     }).addTo(map);
 
     // Marcador com ícone estilizado
